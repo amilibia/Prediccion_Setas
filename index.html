@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Predicción de setas - Navarra</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .card-chance-Alta { background-image: linear-gradient(to right, #D1FAE5, #34D399); }
+    .card-chance-Media { background-image: linear-gradient(to right, #FEF3C7, #F59E0B); }
+    .card-chance-Baja { background-image: linear-gradient(to right, #FEE2E2, #F87171); }
+    .loading-spinner { border: 4px solid rgba(0, 0, 0, 0.1); border-left-color: #4CAF50; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .score-breakdown-details { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    .score-breakdown li { margin-left: 1.5rem; position: relative; }
+    .score-breakdown li::before { content: '✅'; position: absolute; left: -1.5rem; }
+    .score-breakdown.no-score li::before { content: '❌'; }
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0, 0, 0, 0.4); padding-top: 60px; }
+    .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 800px; border-radius: 1rem; position: relative; }
+    .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+    .close:hover, .close:focus { color: black; text-decoration: none; cursor: pointer; }
+    details > summary { cursor: pointer; }
+    .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .15rem .5rem; border-radius: 9999px; font-weight: 600; font-size: .75rem; }
+  </style>
+</head>
+<body class="bg-green-50 min-h-screen p-6 font-sans">
+  <header class="text-center mb-8 relative">
+    <h1 class="text-4xl font-extrabold text-green-800 mb-2">🍄 Predicción de Setas en Navarra 🌲</h1>
+    <p class="text-lg text-gray-600">Probabilidad general y especie más probable según condiciones.</p>
+    <button id="help-button" class="absolute top-2 right-2 text-gray-400 hover:text-green-600 text-3xl font-bold leading-none" aria-label="Ayuda">&#9432;</button>
+  </header>
+
+  <div id="notification" class="max-w-6xl mx-auto mb-4 hidden p-4 rounded-md text-sm"></div>
+
+  <div class="max-w-6xl mx-auto mb-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Añadir nueva ubicación -->
+    <div class="bg-white shadow-lg rounded-xl p-5 md:col-span-1">
+      <h3 class="text-xl font-bold text-gray-800 mb-4">Añadir nueva ubicación</h3>
+      <div id="add-location-form" class="space-y-4 flex-col">
+        <div class="flex-1 flex gap-2">
+          <input type="text" id="location-name" placeholder="Escribe el lugar (ej. Aralar, Navarra)" required class="w-full p-2 border border-gray-300 rounded-md" />
+          <button type="button" id="search-button" class="bg-green-600 text-white px-6 py-2 rounded-md font-semibold hover:bg-green-700 transition duration-300 ease-in-out">Buscar</button>
+        </div>
+        <details class="bg-green-50 rounded-md p-3 border border-green-200">
+          <summary class="font-semibold text-green-800">Opciones de hábitat (opcional)</summary>
+          <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <label class="block">
+              <span class="text-gray-700">Tipo de hábitat</span>
+              <select id="habitat-select" class="mt-1 block w-full border rounded-md p-2">
+                <option value="">(sin especificar)</option>
+                <option value="hayedo">Hayedo</option>
+                <option value="robledal_atlantico">Robledal atlántico</option>
+                <option value="pinar_silvestre">Pinar de pino silvestre</option>
+                <option value="carrascal">Carrascal</option>
+                <option value="mixto_caducifolio">Mixto caducifolio</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="text-gray-700">Edad del arbolado</span>
+              <select id="age-select" class="mt-1 block w-full border rounded-md p-2">
+                <option value="">(sin especificar)</option>
+                <option value="maduro">Maduro (&gt;80 años)</option>
+                <option value="medio">Medio (40–80)</option>
+                <option value="joven">Joven (&lt;40)</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="text-gray-700">Suelo</span>
+              <select id="soil-select" class="mt-1 block w-full border rounded-md p-2">
+                <option value="">(sin especificar)</option>
+                <option value="acidofilo">Ácido</option>
+                <option value="basofilo">Básico</option>
+              </select>
+            </label>
+          </div>
+        </details>
+        <div id="search-results" class="mt-2 hidden">
+          <p id="search-status" class="text-sm text-gray-500 mb-2"></p>
+          <button type="button" id="add-location-btn" class="bg-blue-600 text-white px-6 py-2 rounded-md font-semibold hover:bg-blue-700 transition duration-300 ease-in-out hidden">Añadir a Mis Lugares</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fase Lunar -->
+    <div id="moon-phase-card" class="bg-white shadow-lg rounded-xl p-5 md:col-span-1 flex flex-col justify-center items-center">
+      <h3 class="text-xl font-bold text-gray-800 mb-2 text-center">Fase Lunar</h3>
+      <div class="flex items-center space-x-2">
+        <span id="moon-emoji" class="text-4xl"></span>
+        <div class="text-gray-700">
+          <p id="moon-phase-name" class="font-semibold text-lg"></p>
+          <p id="next-full-moon" class="text-xs"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Parques -->
+    <div class="bg-white shadow-lg rounded-xl p-5 md:col-span-1">
+      <h3 class="text-xl font-bold text-gray-800 mb-4">Parques Micológicos</h3>
+      <p class="text-sm text-gray-600 mb-2">Consulta los partes de setas que publican los parques.</p>
+      <div class="flex flex-wrap gap-2 justify-start">
+        <a href="https://parquemicologicoultzama.com/" target="_blank" class="px-4 py-2 bg-green-200 text-green-800 rounded-md font-semibold hover:bg-green-300 transition-colors duration-200 text-sm">Ultzama</a>
+        <a href="https://www.parquemicologicoerro.com/" target="_blank" class="px-4 py-2 bg-green-200 text-green-800 rounded-md font-semibold hover:bg-green-300 transition-colors duration-200 text-sm">Erro-Arribe</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controles -->
+  <div id="controls" class="bg-white shadow-lg rounded-xl p-4 mb-8 max-w-6xl mx-auto flex flex-wrap gap-4 items-center justify-between">
+    <div class="flex flex-wrap gap-2 items-center">
+      <span class="font-semibold text-gray-700">Filtrar por:</span>
+      <button data-filter="all" class="filter-btn bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Todas</button>
+      <button data-filter="Alta" class="filter-btn bg-green-200 hover:bg-green-300 text-green-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Alta</button>
+      <button data-filter="Media" class="filter-btn bg-yellow-200 hover:bg-yellow-300 text-yellow-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Media</button>
+      <button data-filter="Baja" class="filter-btn bg-red-200 hover:bg-red-300 text-red-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Baja</button>
+    </div>
+    <div class="flex flex-wrap gap-2 items-center">
+      <span class="font-semibold text-gray-700">Ordenar por:</span>
+      <button data-sort="name" class="sort-btn bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Nombre</button>
+      <button data-sort="chance" class="sort-btn bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 py-1 rounded-md text-sm transition-colors duration-200">Probabilidad</button>
+    </div>
+  </div>
+
+  <!-- Grid -->
+  <div id="grid-container" class="max-w-6xl mx-auto">
+    <p id="loading-message" class="text-center text-gray-700 text-lg hidden">Cargando predicciones... <span class="loading-spinner inline-block align-middle ml-2"></span></p>
+    <div id="grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+    <div id="welcome-message" class="hidden text-center max-w-2xl mx-auto p-8 bg-white shadow-lg rounded-xl">
+      <h2 class="text-2xl font-bold text-green-700 mb-4">¡Bienvenido/a!</h2>
+      <p class="text-gray-600">Empieza a planificar tu próxima salida al monte añadiendo tus lugares favoritos con el buscador de arriba. Las ubicaciones que añadas se guardarán automáticamente en tu navegador.</p>
+    </div>
+  </div>
+
+  <!-- Modal de ayuda -->
+  <div id="help-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="modal-content">
+      <span class="close" aria-label="Cerrar">&times;</span>
+      <h2 id="help-title" class="text-2xl font-bold text-green-800 mb-4">Acerca de esta aplicación</h2>
+      <p class="mb-4 text-gray-700">Esta aplicación estima la probabilidad de encontrar setas combinando condiciones meteorológicas recientes y un modelo heurístico ajustado a hábitats típicos del norte de Navarra.</p>
+      <h3 class="font-bold text-lg mb-2">¿Cómo se calcula la probabilidad?</h3>
+      <ul class="list-disc list-inside space-y-2 mb-4 text-sm text-gray-700">
+        <li><b>Humedad del suelo (SMI):</b> integra lluvia y resta ET0 para simular el “depósito” de agua útil en suelo.</li>
+        <li><b>Gatillo post-lluvia:</b> tras ≥25&nbsp;mm en 48&nbsp;h se activa un bonus entre 6–12 días después.</li>
+        <li><b>Temperatura templada:</b> favorece 8–18&nbsp;°C; calor &gt;22&nbsp;°C penaliza.</li>
+        <li><b>Aire húmedo (T−Td):</b> cuanto más cerca esté T del punto de rocío, mejor.</li>
+        <li><b>Restan:</b> calor sostenido (máx. ≥24&nbsp;°C), viento con calor y heladas recientes.</li>
+        <li><b>Suavizado:</b> filtro de 3 días para evitar “dientes de sierra”.</li>
+        <li><b>Hábitat (opcional):</b> tipo de hábitat, edad y acidez del suelo aplican un multiplicador suave (±10–15%).</li>
+      </ul>
+      <h3 class="font-bold text-lg mb-2">Modo especie</h3>
+      <ul class="list-disc list-inside space-y-2 mb-4 text-sm text-gray-700">
+        <li>Se estima la <b>probabilidad relativa</b> de cinco grupos: <b>Boletus</b>, <b>Cantharellus</b>, <b>Níscalos</b>, <b>Lepista nuda</b> y <b>Hydnum repandum</b>, a partir de estación, temperatura, humedad de suelo, T−Td y hábitat.</li>
+        <li>La <b>“Mejor especie hoy”</b> aparece como etiqueta bajo el nombre del lugar y también junto a cada día.</li>
+        <li>Gráfico: <b>barras apiladas por día (valores absolutos)</b> + <b>línea de probabilidad base</b> para ver magnitud real.</li>
+      </ul>
+      <p class="mt-6 text-xs text-gray-500 italic">Recolecta con respeto y jamás consumas sin identificación total. Esta herramienta es orientativa.</p>
+    </div>
+  </div>
+
+<script>
+  // === Constantes de APIs ===
+  const OPENMETEO_API_URL = "https://api.open-meteo.com/v1/forecast";
+  const NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/search";
+  const OPENTOPO_API_URL = "https://api.opentopodata.org/v1/aster30m";
+
+  // === Bounding Box para Navarra y entorno (Aragón, La Rioja, País Vasco) ===
+  const NAVARRA_BBOX = {
+    minLon: -2.5, // Oeste
+    maxLon: -0.7, // Este
+    minLat: 41.8, // Sur
+    maxLat: 43.4  // Norte
+  };
+
+  // === Ubicaciones por defecto ===
+  const DEFAULT_LOCATIONS = [
+    { name: "Altsasu", lat: 42.9078, lon: -2.1706, habitat: "hayedo", ageClass: "maduro", soilAcidity: "acidofilo" },
+    { name: "Etxalar", lat: 43.2336728, lon: -1.6406026, habitat: "robledal_atlantico", ageClass: "medio", soilAcidity: "basofilo" },
+    { name: "Leitza", lat: 43.0786, lon: -1.9146, habitat: "mixto_caducifolio", ageClass: "joven", soilAcidity: "acidofilo" },
+    { name: "Ultzama", lat: 43.0095198, lon: -1.6845978, habitat: "hayedo", ageClass: "maduro", soilAcidity: "acidofilo" },
+    { name: "Zubiri", lat: 42.8969, lon: -1.5091, habitat: "pinar_silvestre", ageClass: "medio", soilAcidity: "basofilo" }
+  ];
+
+  let LOCATIONS = [];
+  let currentFilter = 'all';
+  let currentSort = 'name';
+  let allForecastData = [];
+
+  // === Emojis de tiempo ===
+  const WEATHER_ICONS = {
+    0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️', 45: '🌫️', 48: '🌫️', 51: '🌧️', 53: '🌧️', 55: '🌧️',
+    56: '🌧️', 57: '🌧️', 61: '🌦️', 63: '🌧️', 65: '⛈️', 66: '🌨️', 67: '🌨️', 71: '🌨️',
+    73: '🌨️', 75: '🌨️', 77: '🌨️', 80: '🌧️', 81: '🌧️', 82: '⛈️', 85: '🌨️', 86: '🌨️',
+    95: '🌩️', 96: '⛈️', 99: '⛈️', default: '❓'
+  };
+
+  // === Fases lunares ===
+  const MOON_PHASES = [
+    { name: "Luna Nueva", emoji: "🌑" },
+    { name: "Luna Creciente", emoji: "🌒" },
+    { name: "Cuarto Creciente", emoji: "🌓" },
+    { name: "Luna Gibosa Creciente", emoji: "🌔" },
+    { name: "Luna Llena", emoji: "🌕" },
+    { name: "Luna Gibosa Menguante", emoji: "🌖" },
+    { name: "Cuarto Menguante", emoji: "🌗" },
+    { name: "Luna Menguante", emoji: "🌘" }
+  ];
+
+  // === Especies (perfiles heurísticos) ===
+  const SPECIES = {
+    boletus: {
+      key: 'boletus', label: 'Boletus gr. edulis', color: '#047857', light: '#D1FAE5',
+      habitats: { hayedo: 1.20, robledal_atlantico: 1.15, mixto_caducifolio: 1.1, pinar_silvestre: 0.95, carrascal: 0.85 },
+      temp: [10, 18], smi: [0.55, 0.75],
+      seasonWeight: m => (m >= 8 && m <= 10) ? 1 : (m === 7 || m === 11 ? 0.6 : 0.2),
+      dewBias: 0.7, windPenalty: 0.6
+    },
+    cantharellus: {
+      key: 'cantharellus', label: 'Cantharellus cibarius', color: '#CA8A04', light: '#FEF3C7',
+      habitats: { hayedo: 1.10, robledal_atlantico: 1.10, mixto_caducifolio: 1.1, pinar_silvestre: 1.00, carrascal: 0.9 },
+      temp: [8, 20], smi: [0.6, 0.85],
+      seasonWeight: m => (m >= 5 && m <= 10) ? 1 : (m === 4 || m === 11 ? 0.6 : 0.2),
+      dewBias: 1.0, windPenalty: 0.4
+    },
+    lactarius: {
+      key: 'lactarius', label: 'Níscalos (Lactarius gr. deliciosus)', color: '#B91C1C', light: '#FEE2E2',
+      habitats: { hayedo: 0.95, robledal_atlantico: 1.00, mixto_caducifolio: 1.0, pinar_silvestre: 1.20, carrascal: 0.95 },
+      temp: [9, 16], smi: [0.5, 0.7],
+      seasonWeight: m => (m >= 8 && m <= 10) ? 1 : (m === 7 || m === 11 ? 0.7 : 0.2),
+      dewBias: 0.6, windPenalty: 0.5
+    },
+    lepista_nuda: {
+      key: 'lepista_nuda', label: 'Lepista nuda (pie azul)', color: '#6D28D9', light: '#EDE9FE',
+      habitats: { hayedo: 1.05, robledal_atlantico: 1.05, mixto_caducifolio: 1.1, pinar_silvestre: 1.00, carrascal: 0.9 },
+      temp: [4, 12], smi: [0.6, 0.8],
+      seasonWeight: m => (m === 10 || m === 11) ? 1 : (m === 0 || m === 9 ? 0.7 : 0.2),
+      dewBias: 0.9, windPenalty: 0.5
+    },
+    hydnum_repandum: {
+      key: 'hydnum_repandum', label: 'Hydnum repandum (lengua de vaca)', color: '#9A3412', light: '#FFEDD5',
+      habitats: { hayedo: 1.15, robledal_atlantico: 1.10, mixto_caducifolio: 1.1, pinar_silvestre: 0.95, carrascal: 0.9 },
+      temp: [6, 15], smi: [0.6, 0.8],
+      seasonWeight: m => (m >= 8 && m <= 10) ? 1 : (m === 7 || m === 11 ? 0.6 : 0.2),
+      dewBias: 0.8, windPenalty: 0.5
+    }
+  };
+
+  // === UI helpers ===
+  function showNotification(message, type = 'info') {
+    const notification = document.getElementById('notification');
+    notification.textContent = message;
+    notification.className = `max-w-6xl mx-auto mb-4 p-4 rounded-md text-sm ${type === 'error' ? 'bg-red-100 text-red-800' : type === 'warning' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`;
+    notification.classList.remove('hidden');
+    setTimeout(() => notification.classList.add('hidden'), 5000);
+  }
+  function slugify(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
+  function todayLocalYYYYMMDD() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+  function getWeatherIcon(weatherCode) { return WEATHER_ICONS[weatherCode] || WEATHER_ICONS.default; }
+
+  // === Fetch meteorología ===
+  async function fetchWeather(lat, lon, pastDays = 14, forecastDays = 7) {
+    const cacheKey = `weather_${lat}_${lon}_${pastDays}_${forecastDays}`;
+    const cachedData = localStorage.getItem(cacheKey);
+    const cacheTime = localStorage.getItem(`${cacheKey}_time`);
+    const cacheDuration = 6 * 60 * 60 * 1000;
+    if (cachedData && cacheTime && (Date.now() - parseInt(cacheTime)) < cacheDuration) {
+      showNotification('Usando datos meteorológicos cacheados.', 'info');
+      return JSON.parse(cachedData);
+    }
+    if (!navigator.onLine) {
+      if (cachedData) {
+        showNotification('Sin conexión, usando datos cacheados.', 'warning');
+        return JSON.parse(cachedData);
+      }
+      showNotification('Sin conexión a internet y sin datos cacheados.', 'error');
+      throw new Error('Offline');
+    }
+    const url = `${OPENMETEO_API_URL}?latitude=${lat}&longitude=${lon}&past_days=${pastDays}&forecast_days=${forecastDays}&hourly=temperature_2m,relative_humidity_2m,precipitation,dew_point_2m,weather_code,wind_speed_10m,et0_fao_evapotranspiration&timezone=Europe%2FMadrid`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      localStorage.setItem(cacheKey, JSON.stringify(data));
+      localStorage.setItem(`${cacheKey}_time`, Date.now().toString());
+      return data;
+    } catch (e) {
+      if (cachedData) {
+        showNotification('Error al obtener datos nuevos, usando datos cacheados.', 'warning');
+        return JSON.parse(cachedData);
+      }
+      showNotification('Error al obtener datos meteorológicos.', 'error');
+      throw e;
+    }
+  }
+  async function fetchAltitude(lat, lon) {
+    try {
+      const url = `${OPENTOPO_API_URL}?locations=${lat},${lon}`;
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.results[0].elevation || null;
+    } catch (e) {
+      console.warn('Altitud KO', e);
+      return null;
+    }
+  }
+
+  // === Preproceso diario ===
+  function processDailyData(data) {
+    const days = {};
+    data.hourly.time.forEach((time, i) => {
+      const date = new Date(time).toISOString().split("T")[0];
+      if (!days[date]) days[date] = { temps: [], rain_for_day: 0, humidities: [], dew_points: [], weather_codes: [], wind_speeds: [], temp_max: -Infinity, et0: [] };
+      days[date].temps.push(data.hourly.temperature_2m[i]);
+      days[date].humidities.push(data.hourly.relative_humidity_2m[i]);
+      days[date].dew_points.push(data.hourly.dew_point_2m[i]);
+      days[date].rain_for_day += data.hourly.precipitation[i] || 0;
+      days[date].weather_codes.push(data.hourly.weather_code[i]);
+      days[date].wind_speeds.push(data.hourly.wind_speed_10m[i]);
+      days[date].et0.push(data.hourly.et0_fao_evapotranspiration[i] || 0);
+      if (data.hourly.temperature_2m[i] > days[date].temp_max) days[date].temp_max = data.hourly.temperature_2m[i];
+    });
+    return Object.entries(days).map(([date, vals]) => ({
+      date,
+      temps: vals.temps,
+      humidities: vals.humidities,
+      rain_for_day: vals.rain_for_day,
+      dew_points: vals.dew_points,
+      wind_speeds: vals.wind_speeds,
+      et0: vals.et0,
+      temp_min: Math.min(...vals.temps),
+      temp_max: vals.temp_max,
+      avg_humidity: vals.humidities.reduce((a, b) => a + b, 0) / vals.humidities.length || 0,
+      avg_dew_point: vals.dew_points.reduce((a, b) => a + b, 0) / vals.dew_points.length || 0,
+      avg_wind_speed: vals.wind_speeds.reduce((a, b) => a + b, 0) / vals.wind_speeds.length || 0,
+      avg_et0: vals.et0.reduce((a, b) => a + b, 0) / vals.et0.length || 0,
+      weather_code: getDominantWeatherCode(vals.weather_codes)
+    }));
+  }
+
+  function getDominantWeatherCode(codes) {
+    const counts = codes.reduce((acc, c) => ((acc[c] = (acc[c] || 0) + 1), acc), {});
+    return parseInt(Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]);
+  }
+
+  // === Modelo general ===
+  function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+  function computeSoilMoistureIndex(dailyRain, dailyET0, Smax = 80, infil = 0.8, runoffCap = 25) {
+    let S = Smax * 0.5; const out = [];
+    for (let i = 0; i < dailyRain.length; i++) {
+      const effRain = Math.min(dailyRain[i] || 0, runoffCap) * infil;
+      const et = Math.max(dailyET0[i] || 0, 0);
+      S = clamp(S + effRain - et, 0, Smax);
+      out.push(S / Smax);
+    }
+    return out;
+  }
+
+  function computeRainTrigger(dailyRain, windowDays = 2, threshold = 25, lagMin = 6, lagMax = 12) {
+    const n = dailyRain.length, trig = new Array(n).fill(0);
+    let last = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const sum2 = dailyRain.slice(Math.max(0, i - windowDays + 1), i + 1).reduce((a, b) => a + (b || 0), 0);
+      if (sum2 >= threshold) last = i;
+      const d = i - last;
+      if (d >= lagMin && d <= lagMax) {
+        const mid = (lagMin + lagMax) / 2, sigma = (lagMax - lagMin) / 4;
+        trig[i] = Math.exp(-0.5 * Math.pow((d - mid) / sigma, 2));
+      }
+    }
+    return trig;
+  }
+
+  function dewSpreadScore(T, Td) {
+    const spread = Math.max(0, (T || 0) - (Td || 0));
+    return spread <= 2 ? 1.0 : (spread <= 4 ? 0.5 : (spread <= 6 ? 0.0 : -0.5));
+  }
+
+  function smooth3(arr) {
+    const out = [];
+    for (let i = 0; i < arr.length; i++) {
+      const p0 = arr[i], p1 = i > 0 ? arr[i - 1] : p0, p2 = i > 1 ? arr[i - 2] : p1;
+      out.push(0.6 * p0 + 0.3 * p1 + 0.1 * p2);
+    }
+    return out;
+  }
+
+  const HABITAT_MULTIPLIER = { hayedo: 1.15, robledal_atlantico: 1.10, mixto_caducifolio: 1.08, pinar_silvestre: 1.00, carrascal: 0.85 };
+  const AGE_MULTIPLIER = { maduro: 1.10, medio: 1.00, joven: 0.90 };
+  const SOIL_MULTIPLIER = { acidofilo: 1.10, basofilo: 1.00 };
+
+function computeMushroomChances(dailyData, location, opts = {}) {
+  const results = dailyData.map(day => ({
+    ...day,
+    chance: "Baja",
+    score: 0,
+    score_breakdown: [],
+    smi: 0,
+    tmed: 0,
+    dewS: 0,
+    baseProb: 0
+  }));
+
+  const rain = dailyData.map(d => d.rain_for_day || 0),
+        et0 = dailyData.map(d => d.avg_et0 || 0),
+        tmed = dailyData.map(d => (d.temp_min + d.temp_max) / 2),
+        td = dailyData.map(d => d.avg_dew_point || 0),
+        wind = dailyData.map(d => d.avg_wind_speed || 0);
+
+  const smi = computeSoilMoistureIndex(rain, et0, opts.Smax || 80, opts.infil || 0.8, opts.runoffCap || 25);
+  const trig = computeRainTrigger(rain, 2, opts.triggerThreshold || 20, opts.lagMin || 5, opts.lagMax || 12);
+
+  const scores = [];
+  for (let i = 0; i < dailyData.length; i++) {
+    let sc = 0;
+    const bd = [];
+
+    // --- Humedad de suelo ---
+    const sm = smi[i];
+    if (sm >= 0.7) { sc += 2.5; bd.push("Suelo húmedo (SMI ≥ 0.7) (+2.5)"); }
+    else if (sm >= 0.5) { sc += 1.5; bd.push("Suelo con humedad media (SMI ≥ 0.5) (+1.5)"); }
+    else if (sm > 0.3) { sc += 0.5; bd.push("Suelo algo seco (SMI > 0.3) (+0.5)"); }
+    else { bd.push("Suelo seco (SMI ≤ 0.3)"); }
+
+    // --- Gatillo de lluvia ---
+    if (trig[i] > 0) {
+      const add = 1.8 * trig[i];
+      sc += add;
+      bd.push(`Brote tras lluvia reciente (+${add.toFixed(1)})`);
+    }
+
+    // --- Lluvia acumulada últimos 20 días ---
+    const last20 = rain.slice(Math.max(0, i - 19), i + 1).reduce((a, b) => a + b, 0);
+    if (last20 >= 80) {
+      sc += 1.2;
+      bd.push("Reserva hídrica alta (≥80 mm/20d) (+1.2)");
+    }
+
+    // --- Penalización por sequía prolongada ---
+    const last30 = rain.slice(Math.max(0, i - 29), i + 1).reduce((a, b) => a + b, 0);
+    if (last30 < 40) {
+      sc -= 1.5;
+      bd.push("Sequía prolongada (<40 mm/30d) (−1.5)");
+    }
+
+    // --- Temperatura ---
+    const t = tmed[i];
+    const optMin = 8, optMax = 18;
+    if (t >= optMin && t <= optMax) {
+      sc += 1.2;
+      bd.push(`Temp. óptima (${optMin}-${optMax}°C) (+1.2)`);
+    } else if (t > 24) {
+      sc -= 1.0; // penalización más fuerte
+      bd.push("Calor alto (>24°C) (−1.0)");
+    }
+
+    // --- Humedad / rocío ---
+    const ds = dewSpreadScore(t, td[i]);
+    if (ds > 0) { sc += ds * 1.0; bd.push(`Aire húmedo (rocío) (+${(ds*1.0).toFixed(1)})`); }
+    else if (ds < 0) { sc += ds; bd.push(`Aire seco (${ds.toFixed(1)})`); }
+
+    // --- Penalización por viento + calor ---
+    const avg3Wind = i >= 2 ? (wind[i] + wind[i - 1] + wind[i - 2]) / 3 : wind[i];
+    const avg3Temp = i >= 2 ? (tmed[i] + tmed[i - 1] + tmed[i - 2]) / 3 : t;
+    if (avg3Wind > 20 && avg3Temp > 20) { sc -= 1.5; bd.push("Viento+calor (−1.5)"); }
+
+    // --- Heladas ---
+    const last7 = dailyData.slice(Math.max(0, i - 6), i + 1);
+    const frost = last7.filter(d => d.temp_min <= -2).length;
+    if (frost >= 2) { sc -= 1.5; bd.push("Heladas recientes (−1.5)"); }
+
+    // --- Corrección por altitud y época ---
+    if (location.altitude) {
+      if (location.altitude < 800) {
+        const month = new Date(dailyData[i].date).getMonth(); // 0=Enero, 8=Sept
+        if (month < 8) {
+          sc -= 1.0;
+          bd.push("Zona baja y temporada temprana (−1.0)");
+        }
+      } else if (location.altitude > 1000) {
+        sc -= 0.5;
+        bd.push("Alta montaña (>1000 m, retraso temporada) (−0.5)");
+      }
+    }
+
+    // --- Multiplicadores de hábitat ---
+    let mult = 1.0;
+    if (location.habitat) mult *= (HABITAT_MULTIPLIER[location.habitat] || 1.0);
+    if (location.ageClass) mult *= (AGE_MULTIPLIER[location.ageClass] || 1.0);
+    if (location.soilAcidity) mult *= (SOIL_MULTIPLIER[location.soilAcidity] || 1.0);
+    if (mult !== 1.0) bd.push(`Factor de hábitat ×${mult.toFixed(2)}`);
+    sc *= mult;
+
+    // --- Probabilidad final (curva más exigente) ---
+    const prob = 1 / (1 + Math.exp(-(sc - 5.2))); 
+    const p = clamp(prob * 100, 0, 100);
+
+    scores.push({ prob: p, bd });
+    results[i].smi = sm;
+    results[i].tmed = t;
+    results[i].dewS = ds;
+    results[i].baseProb = p;
+  }
+
+  const probs = smooth3(scores.map(s => s.prob));
+  for (let i = 0; i < results.length; i++) {
+    const p = clamp(probs[i], 0, 100);
+    results[i].score = `${p.toFixed(1)}%`;
+    results[i].score_breakdown = scores[i].bd;
+    results[i].chance = p >= 75 ? "Alta" : (p >= 50 ? "Media" : "Baja");
+    results[i].baseProb = p;
+  }
+  return results;
+}
+
+
+
+  // === MODO ESPECIE ===
+  function triangleSuitability(t, [min, max]) {
+    if (t <= min || t >= max) return 0;
+    const mid = (min + max) / 2;
+    return t <= mid ? (t - min) / (mid - min) : (max - t) / (max - mid);
+  }
+
+  function smiSuitability(smi, [lo, hi]) {
+    if (smi <= lo) return smi / lo * 0.6;
+    if (smi >= hi) return 1;
+    const r = (smi - lo) / (hi - lo);
+    return 0.6 + 0.4 * r;
+  }
+
+  function dewSuitability(ds, bias) {
+    const map = ds <= -0.25 ? 0.3 : (ds <= 0 ? 0.5 : (ds <= 0.75 ? 0.8 : 1));
+    return clamp(map * (0.8 + 0.2 * bias), 0, 1);
+  }
+
+  function windPenalty(avgWind, bias) { return avgWind > 20 ? (1 - 0.2 * bias) : 1; }
+
+  function computeSpeciesProbsForDay(day, location) {
+    const avgWind = day.avg_wind_speed || (Array.isArray(day.wind_speeds) ? day.wind_speeds.reduce((a, b) => a + b, 0) / day.wind_speeds.length : 0);
+    const habitat = location.habitat || '';
+    const monthIdx = new Date(day.date).getMonth();
+    const raw = {};
+    Object.values(SPECIES).forEach(sp => {
+      const base = day.baseProb / 100;
+      const wSeason = sp.seasonWeight(monthIdx);
+      const wHab = habitat ? (sp.habitats[habitat] || 1.0) : 1.0;
+      const wTemp = triangleSuitability(day.tmed, sp.temp);
+      const wSmi = smiSuitability(day.smi, sp.smi);
+      const wDew = dewSuitability(day.dewS, sp.dewBias);
+      const wWind = windPenalty(avgWind, sp.windPenalty);
+      const rawScore = base * wSeason * wHab * wTemp * wSmi * wDew * wWind;
+      raw[sp.key] = rawScore;
+    });
+    const sumRaw = Object.values(raw).reduce((a, b) => a + b, 0) || 1e-6;
+    const speciesProbs = {};
+    Object.keys(raw).forEach(k => { speciesProbs[k] = (raw[k] / sumRaw) * (day.baseProb); });
+    let topKey = Object.keys(speciesProbs).sort((a, b) => speciesProbs[b] - speciesProbs[a])[0];
+    return { speciesProbs, topKey };
+  }
+
+  function annotateSpecies(location) {
+    location.forecast = location.forecast.map(d => {
+      const { speciesProbs, topKey } = computeSpeciesProbsForDay(d, location);
+      d.species = speciesProbs; d.top_species = topKey; return d;
+    });
+    return location;
+  }
+
+  // === Pipeline: fetch + compute ===
+  async function updateLocationData(location) {
+    try {
+      const weatherData = await fetchWeather(location.lat, location.lon, 14, 7);
+      const altitude = await fetchAltitude(location.lat, location.lon);
+      const dailyData = processDailyData(weatherData);
+      location.altitude = altitude;
+      location.forecast = computeMushroomChances(dailyData, location);
+      annotateSpecies(location);
+      allForecastData.push(location);
+      return location;
+    } catch (error) {
+      console.error(`Error fetching data for ${location.name}:`, error);
+      showNotification(`Error al cargar datos para ${location.name}.`, 'error');
+      return null;
+    }
+  }
+
+  // === Render de tarjetas ===
+  function renderLocationCard(location) {
+    const todayDateString = todayLocalYYYYMMDD();
+    const todayIndex = location.forecast.findIndex(day => day.date === todayDateString);
+    const effectiveTodayIndex = todayIndex !== -1 ? todayIndex : 0;
+    const todayForecast = location.forecast[effectiveTodayIndex] || { chance: "Baja", score: "0%", top_species: null };
+    const cardChanceClass = `card-chance-${todayForecast.chance}`;
+    const cid = `chart-${slugify(location.name)}`;
+    const speciesCid = `species-${slugify(location.name)}`;
+    const topLabel = todayForecast.top_species ? SPECIES[todayForecast.top_species].label : '—';
+    const topColor = todayForecast.top_species ? SPECIES[todayForecast.top_species].color : '#6B7280';
+    const card = document.createElement('div');
+    card.className = `bg-white shadow-xl rounded-xl overflow-hidden transform transition-all duration-300 hover:scale-105 card-item ${cardChanceClass}`;
+    card.dataset.chance = todayForecast.chance; card.dataset.name = location.name;
+    card.innerHTML = `
+      <div class="p-6 relative">
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <h4 class="text-2xl font-bold text-gray-800">${location.name}</h4>
+            <div class="mt-1 flex items-center gap-2">
+              <span class="chip" style="background:${SPECIES[todayForecast.top_species]?.light || '#E5E7EB'}; color:${topColor}">● Mejor especie hoy: ${topLabel}</span>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="px-3 py-1 text-sm font-bold text-white rounded-full ${todayForecast.chance === 'Alta' ? 'bg-green-600' : todayForecast.chance === 'Media' ? 'bg-yellow-600' : 'bg-red-600'}">${todayForecast.chance}</span>
+            <button class="remove-location-btn p-2 text-gray-400 hover:text-red-600 text-lg" aria-label="Eliminar ubicación" data-location-name="${location.name}">
+              <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          </div>
+        </div>
+        <div class="w-full h-48 mb-4"><canvas id="${cid}"></canvas></div>
+        <div class="mb-4">
+          <h5 class="font-bold text-gray-800 mb-2">Especies por día (absoluto) — línea = prob. base</h5>
+          <div class="w-full h-40"><canvas id="${speciesCid}"></canvas></div>
+        </div>
+        <div class="full-forecast border-t border-gray-200 pt-4">
+          <h5 class="font-bold text-gray-800 mb-2">Previsión para 7 días:</h5>
+          <ul class="space-y-2">
+            ${location.forecast.slice(effectiveTodayIndex, effectiveTodayIndex + 7).map((day, index) => {
+              const topK = day.top_species; const sp = topK ? SPECIES[topK] : null;
+              const chip = sp ? `<span class="chip" style="background:${sp.light}; color:${sp.color}">● ${sp.label}</span>` : '';
+              return `
+              <li class="flex flex-col text-sm text-gray-600 border-b border-gray-200 last:border-b-0 py-2">
+                <div class="flex justify-between items-center">
+                  <div class="flex-1 flex flex-wrap items-center gap-2 pr-2">
+                    <span class="font-semibold">${new Date(day.date).toLocaleDateString('es-ES', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                    <span class="font-semibold text-gray-800">${getWeatherIcon(day.weather_code)} ${day.temp_min.toFixed(0)}°C - ${day.temp_max.toFixed(0)}°C</span>
+                    <span class="font-semibold text-gray-800">${day.rain_for_day.toFixed(1)}mm</span>
+                    ${chip}
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <span class="px-2 py-1 text-xs font-bold rounded-full ${day.chance === 'Alta' ? 'bg-green-600 text-white' : day.chance === 'Media' ? 'bg-yellow-600 text-white' : 'bg-red-600 text-white'}">${day.chance}</span>
+                    <button class="toggle-score-btn text-gray-400 hover:text-green-600 text-lg" data-target-id="score-details-${slugify(location.name)}-${index}">&#9432;</button>
+                  </div>
+                </div>
+                <div id="score-details-${slugify(location.name)}-${index}" class="score-breakdown-details text-xs mt-2 w-full pl-4 hidden">
+                  <p class="font-bold text-gray-700">Puntuación: <span class="text-green-800">${day.score}</span></p>
+                  <ul class="score-breakdown text-xs text-gray-600 ${day.score_breakdown.length === 0 ? 'no-score' : ''}">${day.score_breakdown.map(item => `<li>${item}</li>`).join('')}</ul>
+                </div>
+              </li>`;
+            }).join('')}
+          </ul>
+        </div>
+      </div>
+    `;
+    document.getElementById('grid').appendChild(card);
+    const historyData = location.forecast.slice(Math.max(0, effectiveTodayIndex - 7), effectiveTodayIndex);
+    const dates = historyData.map(d => new Date(d.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }));
+    const temps = historyData.map(d => (d.temp_min + d.temp_max) / 2);
+    const rain = historyData.map(d => d.rain_for_day);
+    const et0 = historyData.map(d => d.avg_et0 || 0);
+    new Chart(document.getElementById(cid), {
+      type: 'bar',
+      data: {
+        labels: dates,
+        datasets: [
+          { type: 'line', label: 'Temp. (°C)', data: temps, borderColor: '#22C55E', borderWidth: 2, fill: false, yAxisID: 'y-temp', tension: 0.4 },
+          { type: 'bar', label: 'Lluvia (mm)', data: rain, backgroundColor: '#3B82F6', yAxisID: 'y-rain' },
+          { type: 'bar', label: 'ET (mm)', data: et0, backgroundColor: '#F59E0B', yAxisID: 'y-et0' }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 45, minRotation: 45, font: { size: window.innerWidth < 640 ? 8 : 10 } } },
+          'y-temp': { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Temp. (°C)', font: { size: 10 } }, min: Math.min(...temps, 0) - 5, max: Math.max(...temps, 0) + 5, ticks: { font: { size: 8 } } },
+          'y-rain': { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Lluvia (mm)', font: { size: 10 } }, grid: { drawOnChartArea: false }, min: 0, max: Math.max(...rain, 0) > 0 ? Math.max(...rain) * 1.2 : 5, ticks: { font: { size: 8 } } },
+          'y-et0': { type: 'linear', display: true, position: 'right', title: { display: true, text: 'ET (mm)', font: { size: 10 } }, grid: { drawOnChartArea: false }, min: 0, max: Math.max(...et0, 0) > 0 ? Math.max(...et0) * 1.5 : 5, ticks: { font: { size: 8 } } }
+        },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 15, padding: 10 } },
+          tooltip: {
+            enabled: true, mode: 'index', intersect: false,
+            callbacks: {
+              label: (c) => {
+                let label = c.dataset.label || '';
+                if (label) label += ': ';
+                label += c.parsed.y.toFixed(1);
+                label += c.dataset.label.includes('mm') ? ' mm' : ' °C';
+                return label;
+              }
+            }
+          }
+        }
+      }
+    });
+    const next7 = location.forecast.slice(effectiveTodayIndex, effectiveTodayIndex + 7);
+    const dayLabels = next7.map(d => new Date(d.date).toLocaleDateString('es-ES', { weekday: 'short' }));
+    const speciesKeys = Object.keys(SPECIES);
+    const stackedDatasets = speciesKeys.map(k => ({
+      label: SPECIES[k].label,
+      data: next7.map(d => (d.species?.[k] || 0)),
+      backgroundColor: SPECIES[k].color,
+      stack: 'sp'
+    }));
+    const baseLine = {
+      type: 'line',
+      label: 'Probabilidad base',
+      data: next7.map(d => d.baseProb),
+      borderColor: '#9CA3AF',
+      borderWidth: 2,
+      pointRadius: 0,
+      yAxisID: 'y'
+    };
+    new Chart(document.getElementById(speciesCid), {
+      type: 'bar',
+      data: { labels: dayLabels, datasets: [...stackedDatasets, baseLine] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { x: { stacked: true }, y: { stacked: true, max: 100, ticks: { callback: (v) => v + '%' } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => c.dataset.type === 'line' ? `Base: ${c.parsed.y.toFixed(1)}%` : `${c.dataset.label}: ${c.parsed.y.toFixed(1)}%`
+            }
+          }
+        }
+      }
+    });
+    (function buildCompactLegend() {
+      const canvasEl = document.getElementById(speciesCid);
+      const host = canvasEl?.parentElement || card;
+      let legend = document.createElement('div');
+      legend.className = 'mt-1';
+      const chips = speciesKeys.map(k => `<span class="chip" style="background:${SPECIES[k].light}; color:${SPECIES[k].color}">● ${SPECIES[k].label}</span>`).join(' ');
+      legend.innerHTML = `<details class="text-xs text-gray-600"><summary class="cursor-pointer">Leyenda</summary><div class="flex flex-wrap gap-2 mt-2">${chips}</div></details>`;
+      host.appendChild(legend);
+    })();
+    card.querySelector('.remove-location-btn').addEventListener('click', (e) => {
+      const name = e.currentTarget.dataset.locationName;
+      LOCATIONS = LOCATIONS.filter(l => l.name !== name);
+      allForecastData = allForecastData.filter(l => l.name !== name);
+      saveLocations();
+      refreshGrid();
+    });
+  }
+
+  function refreshGrid() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    const todayDateString = todayLocalYYYYMMDD();
+    const filtered = allForecastData.filter(loc => {
+      const i = loc.forecast.findIndex(d => d.date === todayDateString);
+      const ch = loc.forecast[i !== -1 ? i : 0]?.chance || 'Baja';
+      return currentFilter === 'all' || ch === currentFilter;
+    });
+    if (filtered.length === 0 && allForecastData.length > 0) {
+      grid.innerHTML = `<p class="text-center text-gray-500 col-span-full">No hay ubicaciones que coincidan con el filtro '${currentFilter}'.</p>`;
+    } else if (allForecastData.length === 0) {
+      document.getElementById('welcome-message').classList.remove('hidden');
+    } else {
+      document.getElementById('welcome-message').classList.add('hidden');
+      filtered.sort((a, b) => {
+        const today = todayLocalYYYYMMDD();
+        const aC = a.forecast.find(d => d.date === today)?.chance || 'Baja';
+        const bC = b.forecast.find(d => d.date === today)?.chance || 'Baja';
+        if (currentSort === 'chance') {
+          return aC === bC ? a.name.localeCompare(b.name) : (aC === 'Alta' ? -1 : bC === 'Alta' ? 1 : aC === 'Media' ? -1 : 1);
+        }
+        return a.name.localeCompare(b.name);
+      }).forEach(renderLocationCard);
+    }
+  }
+
+  function saveLocations() {
+    localStorage.setItem('mushroomLocations', JSON.stringify(LOCATIONS));
+  }
+
+  async function loadLocations() {
+    const saved = localStorage.getItem('mushroomLocations');
+    LOCATIONS = saved ? JSON.parse(saved) : DEFAULT_LOCATIONS;
+    document.getElementById('loading-message').classList.remove('hidden');
+    const promises = LOCATIONS.map(loc => updateLocationData(loc));
+    Promise.all(promises).then(res => {
+      allForecastData = res.filter(l => l !== null);
+      document.getElementById('loading-message').classList.add('hidden');
+      refreshGrid();
+    }).catch(e => {
+      console.error('load locations', e);
+      document.getElementById('loading-message').classList.add('hidden');
+      showNotification('Error al cargar las ubicaciones.', 'error');
+    });
+  }
+
+  // === Luna ===
+  function getMoonPhase(date) {
+    const jul = date.getTime() / 86400000 + 2440587.5;
+    const cycle = 29.53058867;
+    const new1970 = 2440409.5;
+    const diff = jul - new1970;
+    const phase = diff % cycle;
+    return phase / cycle;
+  }
+
+  function getMoonData(date) {
+    const v = getMoonPhase(date);
+    let idx = Math.floor(v * 8);
+    if (idx === 8) idx = 0;
+    const current = MOON_PHASES[idx];
+    let next = new Date(date), d = 0, found = false;
+    while (!found) {
+      d++;
+      next.setDate(date.getDate() + d);
+      const nv = getMoonPhase(next);
+      const ni = Math.floor(nv * 8);
+      if (ni === 4) found = true;
+    }
+    return { currentPhase: current, nextFullMoonDate: next };
+  }
+
+  function renderMoonPhase() {
+    const today = new Date();
+    const m = getMoonData(today);
+    document.getElementById('moon-emoji').textContent = m.currentPhase.emoji;
+    document.getElementById('moon-phase-name').textContent = m.currentPhase.name;
+    document.getElementById('next-full-moon').textContent = `Próxima luna llena: ${m.nextFullMoonDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}`;
+  }
+
+  // === Eventos DOM ===
+  document.addEventListener('DOMContentLoaded', () => {
+    loadLocations();
+    renderMoonPhase();
+    document.querySelector(`[data-filter="${currentFilter}"]`).classList.add('bg-gray-400', 'text-white');
+    document.querySelector(`[data-sort="${currentSort}"]`).classList.add('bg-gray-400', 'text-white');
+  });
+
+  const searchButton = document.getElementById('search-button');
+  const locationNameInput = document.getElementById('location-name');
+  const searchResultsDiv = document.getElementById('search-results');
+  const searchStatusP = document.getElementById('search-status');
+  const addLocationBtn = document.getElementById('add-location-btn');
+  const habitatSelect = document.getElementById('habitat-select');
+  const ageSelect = document.getElementById('age-select');
+  const soilSelect = document.getElementById('soil-select');
+  let foundLocation = null;
+
+// Cambio euskara
+searchButton.addEventListener('click', async () => {
+  const query = locationNameInput.value.trim();
+  if (query === '') {
+    showNotification('Por favor, introduce un nombre de ubicación.', 'warning');
+    return;
+  }
+
+  searchStatusP.innerHTML = `Buscando <b>${query}</b>... <span class="loading-spinner inline-block align-middle ml-2"></span>`;
+  searchResultsDiv.classList.remove('hidden');
+  addLocationBtn.classList.add('hidden');
+  addLocationBtn.textContent = 'Añadir a Mis Lugares';
+
+  try {
+    const bbox = `${NAVARRA_BBOX.minLon},${NAVARRA_BBOX.minLat},${NAVARRA_BBOX.maxLon},${NAVARRA_BBOX.maxLat}`;
+    const r = await fetch(`${NOMINATIM_API_URL}?q=${encodeURIComponent(query)}&format=json&limit=1&bounded=1&viewbox=${bbox}&addressdetails=1&namedetails=1`);
+    const data = await r.json();
+
+    if (data && data.length > 0) {
+      const loc = data[0];
+      const lat = parseFloat(loc.lat);
+      const lon = parseFloat(loc.lon);
+
+      if (lat >= NAVARRA_BBOX.minLat && lat <= NAVARRA_BBOX.maxLat && lon >= NAVARRA_BBOX.minLon && lon <= NAVARRA_BBOX.maxLon) {
+        // Usar el nombre en euskara si existe
+        const name = loc.namedetails?.["name:eu"] || loc.display_name.split(',')[0];
+        const province = loc.address?.state || loc.address?.province || "";
+        const municipality = loc.address?.town || loc.address?.city || loc.address?.village || "";
+        const country = loc.address?.country || "";
+
+        foundLocation = {
+          name,
+          lat,
+          lon,
+          province,
+          municipality,
+          country
+        };
+
+        searchStatusP.innerHTML = `
+          <b>${name}</b><br>
+          Provincia: ${province || "—"}<br>
+          Municipio: ${municipality || "—"}<br>
+          País: ${country || "—"}<br>
+          Coordenadas: (Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)})
+        `;
+
+        addLocationBtn.textContent = `Añadir "${name}"`;
+        addLocationBtn.classList.remove('hidden');
+      } else {
+        searchStatusP.textContent = 'La ubicación está fuera de Navarra o sus alrededores. Intente con otra.';
+        foundLocation = null;
+      }
+    } else {
+      searchStatusP.textContent = 'Ubicación no encontrada. Intente ser más específico.';
+      foundLocation = null;
+    }
+  } catch (e) {
+    searchStatusP.textContent = 'Error al buscar la ubicación.';
+    console.error(e);
+    foundLocation = null;
+  }
+});
+
+addLocationBtn.addEventListener('click', async () => {
+  if (foundLocation) {
+    if (!LOCATIONS.find(loc => loc.name === foundLocation.name)) {
+      const newLoc = {
+        ...foundLocation,
+        habitat: habitatSelect.value || undefined,
+        ageClass: ageSelect.value || undefined,
+        soilAcidity: soilSelect.value || undefined
+      };
+      LOCATIONS.push(newLoc);
+      saveLocations();
+      locationNameInput.value = '';
+      habitatSelect.value = '';
+      ageSelect.value = '';
+      soilSelect.value = '';
+      searchResultsDiv.classList.add('hidden');
+      document.getElementById('loading-message').classList.remove('hidden');
+      const result = await updateLocationData(newLoc);
+      document.getElementById('loading-message').classList.add('hidden');
+      if (result) refreshGrid();
+    } else {
+      searchStatusP.textContent = 'Esta ubicación ya está en su lista.';
+    }
+  }
+});
+
+//----------------
+
+  const filterButtons = document.querySelectorAll('.filter-btn');
+  filterButtons.forEach(btn => btn.addEventListener('click', (e) => {
+    filterButtons.forEach(b => b.classList.remove('bg-gray-400', 'text-white'));
+    e.target.classList.add('bg-gray-400', 'text-white');
+    currentFilter = e.target.dataset.filter;
+    refreshGrid();
+  }));
+
+  const sortButtons = document.querySelectorAll('.sort-btn');
+  sortButtons.forEach(btn => btn.addEventListener('click', (e) => {
+    sortButtons.forEach(b => b.classList.remove('bg-gray-400', 'text-white'));
+    e.target.classList.add('bg-gray-400', 'text-white');
+    currentSort = e.target.dataset.sort;
+    refreshGrid();
+  }));
+
+  const helpButton = document.getElementById('help-button');
+  const helpModal = document.getElementById('help-modal');
+  const closeButton = document.querySelector('.close');
+  helpButton.onclick = () => helpModal.style.display = "block";
+  closeButton.onclick = () => helpModal.style.display = "none";
+  window.onclick = (e) => { if (e.target == helpModal) helpModal.style.display = "none"; };
+
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('toggle-score-btn')) {
+      const id = e.target.dataset.targetId;
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden');
+    }
+  });
+</script>
+</body>
+</html>
